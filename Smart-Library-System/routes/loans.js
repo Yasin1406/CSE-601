@@ -170,4 +170,54 @@ router.put("/:id/return", async (req, res) => {
   }
 });
 
+// GET /api/loans/user/:user_id - Get loan history for a specific user
+router.get("/user/:user_id", async (req, res) => {
+  try {
+    const userId = req.params.user_id;
+
+    // Validate ObjectId
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ error: "Invalid user_id format" });
+    }
+
+    // Check if user exists
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Fetch loans for the user and populate book details
+    const loans = await Loan.find({ user_id: userId })
+      .populate("book_id", "title author")
+      .lean();
+
+    // Map loans to the desired response format, skipping loans with missing books
+    const formattedLoans = loans
+      .filter((loan) => {
+        if (!loan.book_id) {
+          console.warn(`Loan ${loan._id} references a missing book_id: ${loan.book_id}`);
+          return false;
+        }
+        return true;
+      })
+      .map((loan) => ({
+        id: loan._id.toString(),
+        book: {
+          id: loan.book_id._id.toString(),
+          title: loan.book_id.title,
+          author: loan.book_id.author,
+        },
+        issue_date: loan.issue_date.toISOString(),
+        due_date: loan.due_date.toISOString(),
+        return_date: loan.return_date ? loan.return_date.toISOString() : null,
+        status: loan.status,
+      }));
+
+    res.status(200).json(formattedLoans);
+  } catch (error) {
+    console.error("Error fetching user loans:", error.message);
+    res.status(500).json({ error: "Server error: " + error.message });
+  }
+});
+
 module.exports = router;

@@ -12,7 +12,7 @@ router.get("/books/popular", async (req, res) => {
     const popularBooks = await Loan.aggregate([
       { $group: { _id: "$book_id", borrow_count: { $sum: 1 } } },
       { $sort: { borrow_count: -1 } },
-      { $limit: 5 },
+      { $limit: 3 },
       {
         $lookup: {
           from: "books",
@@ -51,7 +51,7 @@ router.get("/users/active", async (req, res) => {
         },
       },
       { $sort: { books_borrowed: -1 } },
-      { $limit: 5 },
+      { $limit: 3 },
       {
         $lookup: {
           from: "users",
