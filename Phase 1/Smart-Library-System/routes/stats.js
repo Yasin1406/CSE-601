@@ -2,13 +2,13 @@ import express from 'express';
 import {
   getPopularBooks,
   getActiveUsers,
-  getOverview,
-} from '../controllers/statsController.js';
+  getOverviewStats,
+} from '../controllers/statController.js';
 
 const router = express.Router();
 
 router.get('/books/popular', getPopularBooks);
 router.get('/users/active', getActiveUsers);
-router.get('/overview', getOverview);
+router.get('/overview', getOverviewStats);
 
-export default router;
+export default router; // Default export

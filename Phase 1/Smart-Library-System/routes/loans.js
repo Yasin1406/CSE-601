@@ -1,22 +1,22 @@
 import express from 'express';
 import {
-  issueLoan,
-  getUserLoans,
-  getOverdueLoans,
-  extendLoan,
-  getActiveLoans,
-  getPastLoans,
+  createLoan,
   getAllLoans,
+  getLoan,
+  returnLoan,
+  getUserLoans,
+  extendLoan,
+  getOverdueLoans,
 } from '../controllers/loanController.js';
 
 const router = express.Router();
 
-router.post('/', issueLoan);
-router.get('/user/:user_id', getUserLoans);
-router.get('/overdue', getOverdueLoans);
-router.put('/:id/extend', extendLoan);
-router.get('/user/:user_id/active', getActiveLoans);
-router.get('/user/:user_id/past', getPastLoans);
+router.get('/overdue', getOverdueLoans); // New route for overdue loans
+router.post('/', createLoan);
 router.get('/', getAllLoans);
+router.get('/:id', getLoan);
+router.put('/:id/return', returnLoan);
+router.get('/user/:user_id', getUserLoans);
+router.put('/:id/extend', extendLoan);
 
 export default router;

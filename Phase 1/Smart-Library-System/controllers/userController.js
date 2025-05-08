@@ -1,10 +1,9 @@
-import User from '../models/User.js';
+import User from '../models/Users.js'; // Changed from User.js to Users.js
 import mongoose from 'mongoose';
 
 export const createUser = async (req, res) => {
   try {
-    const { name, email, role } = req.body;
-    const user = new User({ name, email, role });
+    const user = new User(req.body);
     await user.save();
     res.status(201).json({
       _id: user._id,
@@ -15,19 +14,29 @@ export const createUser = async (req, res) => {
       updated_at: user.updated_at,
     });
   } catch (error) {
-    console.error('User creation error:', error.message);
+    console.error("User creation error:", error.message);
     res.status(400).json({ error: error.message });
+  }
+};
+
+export const getAllUsers = async (req, res) => {
+  try {
+    const users = await User.find();
+    res.status(200).json(users);
+  } catch (error) {
+    console.error("Error fetching users:", error.message);
+    res.status(500).json({ error: "Server error: " + error.message });
   }
 };
 
 export const getUser = async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ error: 'Invalid user_id format' });
+      return res.status(400).json({ error: "Invalid user_id format" });
     }
     const user = await User.findById(req.params.id);
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: "User not found" });
     }
     res.status(200).json({
       _id: user._id,
@@ -38,15 +47,15 @@ export const getUser = async (req, res) => {
       updated_at: user.updated_at,
     });
   } catch (error) {
-    console.error('Error fetching user:', error.message);
-    res.status(500).json({ error: 'Server error: ' + error.message });
+    console.error("Error fetching user:", error.message);
+    res.status(500).json({ error: "Server error: " + error.message });
   }
 };
 
 export const updateUser = async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ error: 'Invalid user_id format' });
+      return res.status(400).json({ error: "Invalid user_id format" });
     }
 
     const { name, email, role } = req.body;
@@ -57,7 +66,7 @@ export const updateUser = async (req, res) => {
     );
 
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: "User not found" });
     }
 
     res.status(200).json({
@@ -69,17 +78,7 @@ export const updateUser = async (req, res) => {
       updated_at: user.updated_at,
     });
   } catch (error) {
-    console.error('Error updating user:', error.message);
-    res.status(400).json({ error: 'Server error: ' + error.message });
-  }
-};
-
-export const getAllUsers = async (req, res) => {
-  try {
-    const users = await User.find();
-    res.status(200).json(users);
-  } catch (error) {
-    console.error('Error fetching all users:', error.message);
-    res.status(500).json({ error: 'Server error: ' + error.message });
+    console.error("Error updating user:", error.message);
+    res.status(400).json({ error: "Server error: " + error.message });
   }
 };
