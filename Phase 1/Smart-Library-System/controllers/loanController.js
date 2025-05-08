@@ -129,7 +129,7 @@ export const getOverdueLoans = async (req, res) => {
           issue_date: '$issue_date',
           due_date: '$due_date',
           days_overdue: {
-            $floor: { $divide: [{ $subtract: [new Date(), '$due_date'] }, 86400000] },
+            $ceil: { $divide: [{ $subtract: [new Date(), '$due_date'] }, 86400000] },
           },
         },
       },
