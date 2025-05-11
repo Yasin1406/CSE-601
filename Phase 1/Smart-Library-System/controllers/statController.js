@@ -1,106 +1,74 @@
-import Loan from '../models/Loans.js'; // Changed from Loan.js to Loans.js
-import Book from '../models/Books.js'; // Changed from Book.js to Books.js
-import User from '../models/Users.js'; // Changed from User.js to Users.js
 import moment from 'moment';
+import * as bookController from './bookController.js';
+import * as userController from './userController.js';
+import * as loanController from './loanController.js';
 
 export const getPopularBooks = async (req, res) => {
   try {
-    const popularBooks = await Loan.aggregate([
-      { $group: { _id: "$book_id", borrow_count: { $sum: 1 } } },
-      { $sort: { borrow_count: -1 } },
-      { $limit: 3 },
-      {
-        $lookup: {
-          from: "books",
-          localField: "_id",
-          foreignField: "_id",
-          as: "book",
-        },
-      },
-      { $unwind: "$book" },
-      {
-        $project: {
-          book_id: "$_id",
-          title: "$book.title",
-          author: "$book.author",
-          borrow_count: 1,
-        },
-      },
-    ]);
-    res.json(popularBooks);
+    const loans = await loanController.getAllLoans();
+    const popularBooks = Object.entries(
+      loans.reduce((acc, loan) => {
+        acc[loan.book_id] = (acc[loan.book_id] || 0) + 1;
+        return acc;
+      }, {})
+    )
+      .map(([book_id, borrow_count]) => ({ book_id, borrow_count }))
+      .sort((a, b) => b.borrow_count - a.borrow_count)
+      .slice(0, 3)
+      .map(async ({ book_id, borrow_count }) => {
+        const book = await bookController.getBookById(book_id);
+        return { book_id, title: book?.title, author: book?.author, borrow_count };
+      });
+
+    const resolvedBooks = await Promise.all(popularBooks);
+    res.status(200).json(resolvedBooks.filter(book => book !== undefined));
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("Error fetching popular books:", error.message);
+    res.status(500).json({ error: "Server error: " + error.message });
   }
 };
 
 export const getActiveUsers = async (req, res) => {
   try {
-    const activeUsers = await Loan.aggregate([
-      {
-        $group: {
-          _id: "$user_id",
-          books_borrowed: { $sum: 1 },
-          current_borrows: {
-            $sum: { $cond: [{ $eq: ["$status", "ACTIVE"] }, 1, 0] },
-          },
-        },
-      },
-      { $sort: { books_borrowed: -1 } },
-      { $limit: 3 },
-      {
-        $lookup: {
-          from: "users",
-          localField: "_id",
-          foreignField: "_id",
-          as: "user",
-        },
-      },
-      { $unwind: "$user" },
-      {
-        $project: {
-          user_id: "$_id",
-          name: "$user.name",
-          books_borrowed: 1,
-          current_borrows: 1,
-        },
-      },
-    ]);
-    res.json(activeUsers);
+    const userStats = await loanController.getUserBorrowStats();
+    const topUsers = userStats
+      .sort((a, b) => b.books_borrowed - a.books_borrowed)
+      .slice(0, 3)
+      .map(async ({ user_id, books_borrowed }) => {
+        const user = await userController.getUserById(user_id);
+        return { user_id, name: user?.name, books_borrowed };
+      });
+
+    const resolvedUsers = await Promise.all(topUsers);
+    res.status(200).json(resolvedUsers.filter(user => user !== undefined));
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("Error fetching active users:", error.message);
+    res.status(500).json({ error: "Server error: " + error.message });
   }
 };
 
 export const getOverviewStats = async (req, res) => {
   try {
+    const totalBooks = await bookController.getAllBooksCount();
+    const totalUsers = await userController.getAllUsersCount();
+    const booksAvailable = await bookController.getTotalAvailableCopies();
+    const booksBorrowed = await loanController.getActiveLoansCount();
+    const overdueLoans = await loanController.getOverdueLoansCount();
     const today = moment().startOf("day").toDate();
-    const totalBooks = await Book.countDocuments();
-    const totalUsers = await User.countDocuments();
-    const booksAvailable = await Book.aggregate([
-      { $group: { _id: null, total: { $sum: "$available_copies" } } },
-    ]);
-    const booksBorrowed = await Loan.countDocuments({ status: "ACTIVE" });
-    const overdueLoans = await Loan.countDocuments({
-      status: "ACTIVE",
-      due_date: { $lt: Date.now() },
-    });
-    const loansToday = await Loan.countDocuments({
-      issue_date: { $gte: today },
-    });
-    const returnsToday = await Loan.countDocuments({
-      return_date: { $gte: today },
-    });
+    const loansToday = await loanController.getLoansTodayCount(today);
+    const returnsToday = await loanController.getReturnsTodayCount(today);
 
-    res.json({
+    res.status(200).json({
       total_books: totalBooks,
       total_users: totalUsers,
-      books_available: booksAvailable[0]?.total || 0,
+      books_available: booksAvailable,
       books_borrowed: booksBorrowed,
       overdue_loans: overdueLoans,
       loans_today: loansToday,
       returns_today: returnsToday,
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("Error fetching overview stats:", error.message);
+    res.status(500).json({ error: "Server error: " + error.message });
   }
 };

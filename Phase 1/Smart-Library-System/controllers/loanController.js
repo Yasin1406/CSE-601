@@ -1,7 +1,7 @@
 import Loan from '../models/Loans.js';
-import User from '../models/Users.js';
-import Book from '../models/Books.js';
 import mongoose from 'mongoose';
+import * as bookController from './bookController.js';
+import * as userController from './userController.js';
 
 export const createLoan = async (req, res) => {
   const { user_id, book_id, due_date } = req.body;
@@ -14,12 +14,12 @@ export const createLoan = async (req, res) => {
       return res.status(400).json({ error: "Invalid book_id format" });
     }
 
-    const user = await User.findById(user_id);
+    const user = await userController.getUserById(user_id, res);
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    const book = await Book.findById(book_id);
+    const book = await bookController.getBookById(book_id);
     if (!book) {
       return res.status(404).json({ error: "Book not found" });
     }
@@ -39,7 +39,7 @@ export const createLoan = async (req, res) => {
     });
 
     book.available_copies -= 1;
-    await book.save();
+    await bookController.updateBookById(book_id, { available_copies: book.available_copies });
 
     await loan.save();
 
@@ -61,14 +61,17 @@ export const createLoan = async (req, res) => {
   }
 };
 
-export const getAllLoans = async (req, res) => {
+export const getAllLoans = async (req = {}, res) => {
   try {
-    const { status } = req.query;
+    const { status } = req.query || {};
     let query = {};
 
     if (status) {
       if (["ACTIVE", "RETURNED"].indexOf(status.toUpperCase()) === -1) {
-        return res.status(400).json({ error: "Invalid status value. Use 'ACTIVE' or 'RETURNED'" });
+        if (res) {
+          return res.status(400).json({ error: "Invalid status value. Use 'ACTIVE' or 'RETURNED'" });
+        }
+        throw new Error("Invalid status value. Use 'ACTIVE' or 'RETURNED'");
       }
       query = { status: status.toUpperCase() };
     }
@@ -81,10 +84,18 @@ export const getAllLoans = async (req, res) => {
       overdue: loan.status === "ACTIVE" && new Date(loan.due_date) < currentDate,
     }));
 
-    res.status(200).json(loansWithOverdue);
+    if (res) {
+      res.status(200).json(loansWithOverdue);
+    } else {
+      return loansWithOverdue;
+    }
   } catch (error) {
-    console.error("Error fetching loans:", error.message);
-    res.status(500).json({ error: "Server error: " + error.message });
+    if (res) {
+      console.error("Error fetching loans:", error.message);
+      res.status(500).json({ error: "Server error: " + error.message });
+    } else {
+      throw new Error("Error fetching loans: " + error.message);
+    }
   }
 };
 
@@ -135,7 +146,7 @@ export const returnLoan = async (req, res) => {
       return res.status(400).json({ error: "Loan already returned" });
     }
 
-    const book = await Book.findById(loan.book_id);
+    const book = await bookController.getBookById(loan.book_id);
     if (!book) {
       return res.status(404).json({ error: "Book not found" });
     }
@@ -146,7 +157,7 @@ export const returnLoan = async (req, res) => {
     await loan.save();
 
     book.available_copies += 1;
-    await book.save();
+    await bookController.updateBookById(loan.book_id, { available_copies: book.available_copies });
 
     res.status(200).json({
       _id: loan._id,
@@ -174,31 +185,16 @@ export const getUserLoans = async (req, res) => {
       return res.status(400).json({ error: "Invalid user_id format" });
     }
 
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    const loans = await Loan.find({ user_id: userId })
-      .populate("book_id", "title author")
-      .lean();
+    const loans = await Loan.find({ user_id: userId }).lean();
 
     const currentDate = new Date();
     const formattedLoans = loans
       .filter((loan) => {
-        if (!loan.book_id) {
-          console.warn(`Loan ${loan._id} references a missing book_id: ${loan.book_id}`);
-          return false;
-        }
         return true;
       })
       .map((loan) => ({
         id: loan._id.toString(),
-        book: {
-          id: loan.book_id._id.toString(),
-          title: loan.book_id.title,
-          author: loan.book_id.author,
-        },
+        book: { id: loan.book_id.toString() },
         issue_date: loan.issue_date.toISOString(),
         due_date: loan.due_date.toISOString(),
         return_date: loan.return_date ? loan.return_date.toISOString() : null,
@@ -217,7 +213,6 @@ export const extendLoan = async (req, res) => {
   try {
     const { extension_days } = req.body;
 
-    // Validate extension_days
     if (!extension_days || typeof extension_days !== 'number' || !Number.isInteger(extension_days) || extension_days <= 0) {
       return res.status(400).json({ error: "extension_days must be a positive integer" });
     }
@@ -244,11 +239,9 @@ export const extendLoan = async (req, res) => {
       return res.status(400).json({ error: "Maximum extension limit (2) reached" });
     }
 
-    // Calculate new due date based on extension_days
     const newDueDate = new Date(loan.due_date);
     newDueDate.setDate(newDueDate.getDate() + extension_days);
 
-    // Ensure the new due date is in the future
     if (newDueDate <= currentDate) {
       return res.status(400).json({ error: "New due date must be in the future" });
     }
@@ -278,66 +271,97 @@ export const extendLoan = async (req, res) => {
 
 export const getOverdueLoans = async (req, res) => {
   try {
-    const overdueLoans = await Loan.aggregate([
-      {
-        $match: {
-          status: 'ACTIVE',
-          due_date: { $lt: new Date() },
-        },
-      },
-      {
-        $lookup: {
-          from: 'users',
-          localField: 'user_id',
-          foreignField: '_id',
-          as: 'user',
-        },
-      },
-      {
-        $lookup: {
-          from: 'books',
-          localField: 'book_id',
-          foreignField: '_id',
-          as: 'book',
-        },
-      },
-      { $unwind: { path: '$user', preserveNullAndEmptyArrays: false } },
-      { $unwind: { path: '$book', preserveNullAndEmptyArrays: false } },
-      {
-        $project: {
-          id: '$_id',
+    const currentDate = new Date();
+    const overdueLoans = await Loan.find({
+      status: 'ACTIVE',
+      due_date: { $lt: currentDate },
+    }).lean();
+
+    const formattedLoans = await Promise.all(
+      overdueLoans.map(async (loan) => {
+        const user = await userController.getUserById(loan.user_id, res);
+        if (!user || res.headersSent) return null;
+
+        const book = await bookController.getBookById(loan.book_id);
+        if (!book || res.headersSent) return null;
+
+        const dueDate = new Date(loan.due_date);
+        const timeDiff = currentDate - dueDate;
+        const daysOverdue = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
+
+        return {
+          id: loan._id.toString(),
           user: {
-            id: { $toString: '$user._id' },
-            name: '$user.name',
-            email: '$user.email',
+            id: user._id.toString(),
+            name: user.name,
+            email: user.email,
           },
           book: {
-            id: { $toString: '$book._id' },
-            title: '$book.title',
-            author: '$book.author',
+            id: book._id.toString(),
+            title: book.title,
+            author: book.author,
           },
-          issue_date: { $toString: '$issue_date' },
-          due_date: { $toString: '$due_date' },
-          days_overdue: {
-            $floor: {
-              $divide: [
-                { $subtract: [new Date(), '$due_date'] },
-                1000 * 60 * 60 * 24, // Convert milliseconds to days
-              ],
-            },
-          },
-        },
-      },
-      {
-        $match: {
-          'days_overdue': { $gte: 0 },
-        },
-      },
-    ]);
+          issue_date: loan.issue_date.toISOString(),
+          due_date: loan.due_date.toISOString(),
+          days_overdue: daysOverdue >= 0 ? daysOverdue : 0,
+        };
+      })
+    );
 
-    res.status(200).json(overdueLoans);
+    const result = formattedLoans.filter(loan => loan !== null);
+
+    res.status(200).json(result);
   } catch (error) {
     console.error("Error fetching overdue loans:", error.message, error.stack);
     res.status(500).json({ error: "Server error: " + error.message });
+  }
+};
+
+export const getActiveLoansCount = async () => {
+  try {
+    const count = await Loan.countDocuments({ status: "ACTIVE" });
+    return count;
+  } catch (error) {
+    throw new Error("Server error: " + error.message);
+  }
+};
+
+export const getOverdueLoansCount = async () => {
+  try {
+    const count = await Loan.countDocuments({ status: "ACTIVE", due_date: { $lt: new Date() } });
+    return count;
+  } catch (error) {
+    throw new Error("Server error: " + error.message);
+  }
+};
+
+export const getLoansTodayCount = async (today) => {
+  try {
+    const count = await Loan.countDocuments({ issue_date: { $gte: today } });
+    return count;
+  } catch (error) {
+    throw new Error("Server error: " + error.message);
+  }
+};
+
+export const getReturnsTodayCount = async (today) => {
+  try {
+    const count = await Loan.countDocuments({ return_date: { $gte: today } });
+    return count;
+  } catch (error) {
+    throw new Error("Server error: " + error.message);
+  }
+};
+
+export const getUserBorrowStats = async () => {
+  try {
+    const loans = await getAllLoans(); // Fetch all loans without sending response
+    const userStats = loans.reduce((acc, loan) => {
+      acc[loan.user_id] = (acc[loan.user_id] || 0) + 1;
+      return acc;
+    }, {});
+    return Object.entries(userStats).map(([user_id, books_borrowed]) => ({ user_id, books_borrowed }));
+  } catch (error) {
+    throw new Error("Error fetching user borrow stats: " + error.message);
   }
 };

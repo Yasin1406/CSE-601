@@ -1,4 +1,4 @@
-import User from '../models/Users.js'; // Changed from User.js to Users.js
+import User from '../models/Users.js';
 import mongoose from 'mongoose';
 
 export const createUser = async (req, res) => {
@@ -80,5 +80,34 @@ export const updateUser = async (req, res) => {
   } catch (error) {
     console.error("Error updating user:", error.message);
     res.status(400).json({ error: "Server error: " + error.message });
+  }
+};
+
+// Helper method for other controllers
+export const getUserById = async (userId, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      res.status(400).json({ error: "Invalid user_id format" });
+      return null;
+    }
+    const user = await User.findById(userId);
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return null;
+    }
+    return user;
+  } catch (error) {
+    res.status(500).json({ error: "Server error: " + error.message });
+    return null;
+  }
+};
+
+export const getAllUsersCount = async (res) => {
+  try {
+    const count = await User.countDocuments();
+    return count;
+  } catch (error) {
+    res.status(500).json({ error: "Server error: " + error.message });
+    return 0;
   }
 };

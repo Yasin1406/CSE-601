@@ -1,8 +1,6 @@
-import Book from '../models/Books.js'; // Changed from Book.js to Books.js
-import Loan from '../models/Loans.js'; // Changed from Loan.js to Loans.js
+import Book from '../models/Books.js';
 import mongoose from 'mongoose';
 
-// POST /api/books - Add a new book
 export const addBook = async (req, res) => {
   try {
     const { title, author, isbn, genre, copies } = req.body;
@@ -10,7 +8,7 @@ export const addBook = async (req, res) => {
       title,
       author,
       isbn,
-      genre: genre || "", // Default to empty string if not provided
+      genre: genre || "",
       copies,
       available_copies: copies,
     });
@@ -21,18 +19,15 @@ export const addBook = async (req, res) => {
   }
 };
 
-// GET /api/books - Search books by title, author, or genre
 export const searchBooks = async (req, res) => {
   try {
     const { search, genre } = req.query;
     let query = {};
 
-    // If genre is provided, filter by genre (case-insensitive)
     if (genre) {
       query.genre = { $regex: genre, $options: "i" };
     }
 
-    // If search is provided, search title, author, or genre
     if (search) {
       const searchQuery = {
         $or: [
@@ -51,7 +46,6 @@ export const searchBooks = async (req, res) => {
   }
 };
 
-// GET /api/books/:id - Get book details
 export const getBook = async (req, res) => {
   try {
     const book = await Book.findById(req.params.id);
@@ -62,7 +56,6 @@ export const getBook = async (req, res) => {
   }
 };
 
-// PUT /api/books/:id - Update book information
 export const updateBook = async (req, res) => {
   try {
     const { title, author, isbn, genre, copies, available_copies } = req.body;
@@ -78,29 +71,14 @@ export const updateBook = async (req, res) => {
   }
 };
 
-// DELETE /api/books/:id - Remove a book
 export const deleteBook = async (req, res) => {
   try {
     const bookId = req.params.id;
 
-    // Validate ObjectId
     if (!mongoose.Types.ObjectId.isValid(bookId)) {
       return res.status(400).json({ error: "Invalid book_id format" });
     }
 
-    // Check for active loans
-    const activeLoans = await Loan.countDocuments({
-      book_id: bookId,
-      status: "ACTIVE",
-    });
-    if (activeLoans > 0) {
-      return res.status(400).json({
-        error: "Cannot delete book with active loans",
-        active_loans: activeLoans,
-      });
-    }
-
-    // Delete the book
     const book = await Book.findByIdAndDelete(bookId);
     if (!book) {
       return res.status(404).json({ error: "Book not found" });
@@ -110,5 +88,58 @@ export const deleteBook = async (req, res) => {
   } catch (error) {
     console.error("Error deleting book:", error.message);
     res.status(500).json({ error: "Server error: " + error.message });
+  }
+};
+
+// Helper methods for other controllers
+export const getBookById = async (bookId) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(bookId)) {
+      throw new Error("Invalid book_id format");
+    }
+    const book = await Book.findById(bookId);
+    if (!book) {
+      throw new Error("Book not found");
+    }
+    return book;
+  } catch (error) {
+    throw error;
+  }
+};
+
+export const updateBookById = async (bookId, updates) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(bookId)) {
+      throw new Error("Invalid book_id format");
+    }
+    const book = await Book.findByIdAndUpdate(
+      bookId,
+      { ...updates, updated_at: Date.now() },
+      { new: true }
+    );
+    if (!book) {
+      throw new Error("Book not found");
+    }
+    return book;
+  } catch (error) {
+    throw error;
+  }
+};
+
+export const getAllBooksCount = async () => {
+  try {
+    const count = await Book.countDocuments();
+    return count;
+  } catch (error) {
+    throw new Error(error.message);
+  }
+};
+
+export const getTotalAvailableCopies = async () => {
+  try {
+    const books = await Book.aggregate([{ $group: { _id: null, total: { $sum: "$available_copies" } } }]);
+    return books[0]?.total || 0;
+  } catch (error) {
+    throw new Error(error.message);
   }
 };
