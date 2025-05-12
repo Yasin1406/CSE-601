@@ -10,14 +10,40 @@ const PORT = process.env.PORT || 3002;
 
 app.use(express.json());
 
+// Health check endpoint
+app.get('/api/health', async (req, res) => {
+  try {
+    await mongoose.connection.db.admin().ping();
+    res.status(200).json({
+      status: 'OK',
+      database: 'Connected',
+      dbName: mongoose.connection.name,
+      uptime: process.uptime(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'Error',
+      database: 'Disconnected',
+      error: error.message,
+    });
+  }
+});
+
 // MongoDB connection
 mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('Book Service: Connected to MongoDB (book_db)'))
-  .catch((err) => console.error('Book Service: MongoDB connection error:', err));
+  .then(() => {
+    console.log('Connected to MongoDB Atlas');
+    console.log('Database name:', mongoose.connection.name);
+  })
+  .catch((err) => {
+    console.error('MongoDB Atlas connection error:', err.message);
+  });
+
+mongoose.connection.on('connected', () => console.log('Mongoose connected to Atlas'));
+mongoose.connection.on('disconnected', () => console.warn('Mongoose disconnected from Atlas'));
+mongoose.connection.on('error', (err) => console.error('Mongoose error:', err.message));
 
 // Routes
 app.use('/api/books', bookRoutes);
 
-app.listen(PORT, () => {
-  console.log(`Book Service running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Book Service running on port ${PORT}`));

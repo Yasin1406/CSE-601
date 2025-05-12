@@ -1,86 +1,101 @@
 const mongoose = require('mongoose');
+const Book = require('../models/Books');
 
-// Book Schema
-const bookSchema = new mongoose.Schema({
-  title: { type: String, required: true },
-  author: { type: String, required: true },
-  genre: { type: String, required: true },
-  copies: { type: Number, required: true, min: 0 },
-});
-const Book = mongoose.model('Book', bookSchema);
-
-// Add a new book
-const addBook = async (req, res) => {
+exports.createBook = async (req, res) => {
   try {
-    const { title, author, genre, copies } = req.body;
-    const book = new Book({ title, author, genre, copies });
+    const book = new Book(req.body);
     await book.save();
-    res.status(201).json(book);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
+    res.status(201).json({
+      _id: book._id,
+      title: book.title,
+      author: book.author,
+      isbn: book.isbn,
+      genre: book.genre,
+      copies: book.copies,
+      created_at: book.created_at,
+    });
+  } catch (error) {
+    console.error('Book creation error:', error.message);
+    res.status(400).json({ error: error.message });
   }
 };
 
-// Get book by ID
-const getBookById = async (req, res) => {
+exports.getAllBooks = async (req, res) => {
   try {
-    const book = await Book.findById(req.params.id);
-    if (!book) return res.status(404).json({ error: 'Book not found' });
-    res.status(200).json(book);
-  } catch (err) {
-    res.status(500).json({ error: 'Internal server error' });
-  }
-};
-
-// Search books by title, author, or genre
-const searchBooks = async (req, res) => {
-  try {
-    const { title, author, genre } = req.query;
-    const query = {};
-    if (title) query.title = new RegExp(title, 'i');
-    if (author) query.author = new RegExp(author, 'i');
-    if (genre) query.genre = new RegExp(genre, 'i');
-    const books = await Book.find(query);
+    const books = await Book.find();
     res.status(200).json(books);
-  } catch (err) {
-    res.status(500).json({ error: 'Internal server error' });
+  } catch (error) {
+    console.error('Error fetching books:', error.message);
+    res.status(500).json({ error: 'Server error: ' + error.message });
   }
 };
 
-// Update book availability
-const updateAvailability = async (req, res) => {
+exports.getBook = async (req, res) => {
   try {
-    const { copies } = req.body;
-    if (typeof copies !== 'number' || copies < 0) {
-      return res.status(400).json({ error: 'Invalid copies value' });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid book_id format' });
     }
+    const book = await Book.findById(req.params.id);
+    if (!book) {
+      return res.status(404).json({ error: 'Book not found' });
+    }
+    res.status(200).json({
+      _id: book._id,
+      title: book.title,
+      author: book.author,
+      isbn: book.isbn,
+      genre: book.genre,
+      copies: book.copies,
+      created_at: book.created_at,
+    });
+  } catch (error) {
+    console.error('Error fetching book:', error.message);
+    res.status(500).json({ error: 'Server error: ' + error.message });
+  }
+};
+
+exports.updateBook = async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid book_id format' });
+    }
+    const { title, author, genre, copies } = req.body;
     const book = await Book.findByIdAndUpdate(
       req.params.id,
-      { copies },
+      { title, author, genre, copies, updated_at: Date.now() },
       { new: true, runValidators: true }
     );
-    if (!book) return res.status(404).json({ error: 'Book not found' });
-    res.status(200).json(book);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
+    if (!book) {
+      return res.status(404).json({ error: 'Book not found' });
+    }
+    res.status(200).json({
+      _id: book._id,
+      title: book.title,
+      author: book.author,
+      isbn: book.isbn,
+      genre: book.genre,
+      copies: book.copies,
+      created_at: book.created_at,
+      updated_at: book.updated_at,
+    });
+  } catch (error) {
+    console.error('Error updating book:', error.message);
+    res.status(400).json({ error: 'Server error: ' + error.message });
   }
 };
 
-// Delete a book
-const deleteBook = async (req, res) => {
+exports.deleteBook = async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid book_id format' });
+    }
     const book = await Book.findByIdAndDelete(req.params.id);
-    if (!book) return res.status(404).json({ error: 'Book not found' });
+    if (!book) {
+      return res.status(404).json({ error: 'Book not found' });
+    }
     res.status(204).send();
-  } catch (err) {
-    res.status(500).json({ error: 'Internal server error' });
+  } catch (error) {
+    console.error('Error deleting book:', error.message);
+    res.status(500).json({ error: 'Server error: ' + error.message });
   }
-};
-
-module.exports = {
-  addBook,
-  getBookById,
-  searchBooks,
-  updateAvailability,
-  deleteBook,
 };
