@@ -4,14 +4,15 @@ const {
   createLoan,
   getAllLoans,
   returnLoan,
+  getLoansByUser,
 } = require('../controllers/loanController');
 
 router.post('/', createLoan);
 router.get('/', getAllLoans);
-router.patch('/:id/return', returnLoan);
+router.get('/user/:user_id', getLoansByUser); // New route for user loan history
+router.post('/returns', returnLoan); // Changed to POST /api/returns
 
 module.exports = router;
-
 
 /*
 

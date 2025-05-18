@@ -38,15 +38,14 @@ exports.createLoan = async (req, res) => {
       return res.status(503).json({ error: 'Book Service unavailable' });
     }
     const book = bookResponse.data;
-    if (book.copies <= 0) {
+    if (book.available_copies <= 0) {
       return res.status(400).json({ error: 'No copies available' });
     }
 
     // Update Book Availability
     try {
-      await axiosInstance.put(`http://localhost:3002/api/books/${bookId}`, {
-        ...book,
-        copies: book.copies - 1,
+      await axiosInstance.patch(`http://localhost:3002/api/books/${bookId}/availability`, {
+        operation: 'decrement',
       });
     } catch (err) {
       return res.status(503).json({ error: 'Failed to update book availability' });
@@ -56,12 +55,12 @@ exports.createLoan = async (req, res) => {
     const loan = new Loan({ userId, bookId, dueDate });
     await loan.save();
     res.status(201).json({
-      _id: loan._id,
+      id: loan._id,
       userId: loan.userId,
       bookId: loan.bookId,
-      issueDate: loan.issueDate,
-      dueDate: loan.dueDate,
-      status: loan.status,
+      issue_date: loan.issueDate,
+      due_date: loan.dueDate,
+      status: loan.status.toUpperCase(),
     });
   } catch (error) {
     console.error('Loan creation error:', error.message);
@@ -72,7 +71,30 @@ exports.createLoan = async (req, res) => {
 exports.getAllLoans = async (req, res) => {
   try {
     const loans = await Loan.find();
-    res.status(200).json(loans);
+    const formattedLoans = await Promise.all(loans.map(async (loan) => {
+      let bookData = {};
+      try {
+        const bookResponse = await axiosInstance.get(`http://localhost:3002/api/books/${loan.bookId}`);
+        const book = bookResponse.data;
+        bookData = {
+          id: book.id,
+          title: book.title,
+          author: book.author,
+        };
+      } catch (err) {
+        bookData = { id: loan.bookId, title: 'Unknown', author: 'Unknown' };
+      }
+
+      return {
+        id: loan._id,
+        book: bookData,
+        issue_date: loan.issueDate,
+        due_date: loan.dueDate,
+        return_date: loan.returnDate,
+        status: loan.status.toUpperCase(),
+      };
+    }));
+    res.status(200).json(formattedLoans);
   } catch (error) {
     console.error('Error fetching loans:', error.message);
     res.status(500).json({ error: 'Server error: ' + error.message });
@@ -81,10 +103,15 @@ exports.getAllLoans = async (req, res) => {
 
 exports.returnLoan = async (req, res) => {
   try {
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    const { loan_id } = req.body;
+    if (!loan_id) {
+      return res.status(400).json({ error: 'loan_id is required' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(loan_id)) {
       return res.status(400).json({ error: 'Invalid loan_id format' });
     }
-    const loan = await Loan.findById(req.params.id);
+
+    const loan = await Loan.findById(loan_id);
     if (!loan) {
       return res.status(404).json({ error: 'Loan not found' });
     }
@@ -92,38 +119,102 @@ exports.returnLoan = async (req, res) => {
       return res.status(400).json({ error: 'Loan already returned' });
     }
 
-    // Get Book to Update Availability
-    let bookResponse;
-    try {
-      bookResponse = await axiosInstance.get(`http://localhost:3002/api/books/${loan.bookId}`);
-    } catch (err) {
-      return res.status(503).json({ error: 'Book Service unavailable' });
-    }
-    const book = bookResponse.data;
-
     // Update Book Availability
     try {
-      await axiosInstance.put(`http://localhost:3002/api/books/${loan.bookId}`, {
-        ...book,
-        copies: book.copies + 1,
+      await axiosInstance.patch(`http://localhost:3002/api/books/${loan.bookId}/availability`, {
+        operation: 'increment',
       });
     } catch (err) {
-      return res.status(503).json({ error: 'Failed to update book availability' });
+      console.error('Book Service error:', err.response?.data || err.message);
+      return res.status(503).json({ 
+        error: 'Failed to update book availability', 
+        details: err.response?.data?.error || err.message 
+      });
     }
 
     // Mark Loan as Returned
     loan.status = 'returned';
+    loan.returnDate = new Date(); // Set return date to current time
     await loan.save();
+
+    // Fetch Book Details for Response
+    let bookData = {};
+    try {
+      const bookResponse = await axiosInstance.get(`http://localhost:3002/api/books/${loan.bookId}`);
+      const book = bookResponse.data;
+      bookData = {
+        id: book.id,
+        title: book.title,
+        author: book.author,
+      };
+    } catch (err) {
+      bookData = { id: loan.bookId, title: 'Unknown', author: 'Unknown' };
+    }
+
     res.status(200).json({
-      _id: loan._id,
-      userId: loan.userId,
-      bookId: loan.bookId,
-      issueDate: loan.issueDate,
-      dueDate: loan.dueDate,
-      status: loan.status,
+      id: loan._id,
+      book: bookData,
+      issue_date: loan.issueDate,
+      due_date: loan.dueDate,
+      return_date: loan.returnDate,
+      status: loan.status.toUpperCase(),
     });
   } catch (error) {
     console.error('Error returning loan:', error.message);
     res.status(400).json({ error: error.message });
+  }
+};
+
+exports.getLoansByUser = async (req, res) => {
+  try {
+    const { user_id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(user_id)) {
+      return res.status(400).json({ error: 'Invalid user_id format' });
+    }
+
+    // Validate User
+    try {
+      await axiosInstance.get(`http://localhost:3001/api/users/${user_id}`);
+    } catch (err) {
+      if (err.response?.status === 404) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      return res.status(503).json({ error: 'User Service unavailable' });
+    }
+
+    const loans = await Loan.find({ userId: user_id });
+    const total = loans.length;
+
+    const formattedLoans = await Promise.all(loans.map(async (loan) => {
+      let bookData = {};
+      try {
+        const bookResponse = await axiosInstance.get(`http://localhost:3002/api/books/${loan.bookId}`);
+        const book = bookResponse.data;
+        bookData = {
+          id: book.id,
+          title: book.title,
+          author: book.author,
+        };
+      } catch (err) {
+        bookData = { id: loan.bookId, title: 'Unknown', author: 'Unknown' };
+      }
+
+      return {
+        id: loan._id,
+        book: bookData,
+        issue_date: loan.issueDate,
+        due_date: loan.dueDate,
+        return_date: loan.returnDate,
+        status: loan.status.toUpperCase(),
+      };
+    }));
+
+    res.status(200).json({
+      loans: formattedLoans,
+      total,
+    });
+  } catch (error) {
+    console.error('Error fetching user loans:', error.message);
+    res.status(500).json({ error: 'Server error: ' + error.message });
   }
 };

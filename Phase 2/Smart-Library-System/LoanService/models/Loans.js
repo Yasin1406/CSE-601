@@ -5,6 +5,7 @@ const loanSchema = new mongoose.Schema({
   bookId: { type: mongoose.Schema.Types.ObjectId, required: true },
   issueDate: { type: Date, default: Date.now },
   dueDate: { type: Date, required: true },
+  returnDate: { type: Date, default: null },
   status: { type: String, enum: ['active', 'returned'], default: 'active' },
 });
 
