@@ -9,33 +9,65 @@ axiosRetry(axios, {
   shouldResetTimeout: true,
 });
 const axiosInstance = axios.create({
-  timeout: 5000, // 5-second timeout for inter-service calls
+  timeout: 5000,
 });
+
 
 
 export const createLoan = async (req, res) => {
   try {
     const { userId, bookId, dueDate } = req.body;
 
+    // Validate request body
+    if (!userId || !bookId || !dueDate) {
+      return res.status(400).json({ error: 'userId, bookId, and dueDate are required' });
+    }
+
+    // Validate ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ error: 'Invalid userId format' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(bookId)) {
+      return res.status(400).json({ error: 'Invalid bookId format' });
+    }
+
+    // Log GATEWAY_URL and userId for debugging
+    console.log('GATEWAY_URL:', process.env.GATEWAY_URL);
+    console.log('userId:', userId);
+
     // Validate User
     try {
-      await axiosInstance.get(`http://localhost:3001/api/users/${userId}`);
+      const userResponse = await axiosInstance.get(`${process.env.GATEWAY_URL}/api/users/${userId}`);
+      console.log('User validation response:', userResponse.status, userResponse.data);
     } catch (err) {
+      console.error('User validation error:', {
+        message: err.message,
+        status: err.response?.status,
+        data: err.response?.data,
+        url: `${process.env.GATEWAY_URL}/api/users/${userId}`,
+      });
       if (err.response?.status === 404) {
         return res.status(404).json({ error: 'User not found' });
       }
-      return res.status(503).json({ error: 'User Service unavailable' });
+      return res.status(503).json({ error: 'User Service unavailable', details: err.message });
     }
 
     // Validate Book and Availability
     let bookResponse;
     try {
-      bookResponse = await axiosInstance.get(`http://localhost:3002/api/books/${bookId}`);
+      bookResponse = await axiosInstance.get(`${process.env.GATEWAY_URL}/api/books/${bookId}`);
+      console.log('Book validation response:', bookResponse.status, bookResponse.data);
     } catch (err) {
+      console.error('Book validation error:', {
+        message: err.message,
+        status: err.response?.status,
+        data: err.response?.data,
+        url: `${process.env.GATEWAY_URL}/api/books/${bookId}`,
+      });
       if (err.response?.status === 404) {
         return res.status(404).json({ error: 'Book not found' });
       }
-      return res.status(503).json({ error: 'Book Service unavailable' });
+      return res.status(503).json({ error: 'Book Service unavailable', details: err.message });
     }
     const book = bookResponse.data;
     if (book.available_copies <= 0) {
@@ -44,11 +76,16 @@ export const createLoan = async (req, res) => {
 
     // Update Book Availability
     try {
-      await axiosInstance.patch(`http://localhost:3002/api/books/${bookId}/availability`, {
+      await axiosInstance.patch(`${process.env.GATEWAY_URL}/api/books/${bookId}/availability`, {
         operation: 'decrement',
       });
     } catch (err) {
-      return res.status(503).json({ error: 'Failed to update book availability' });
+      console.error('Book availability update error:', {
+        message: err.message,
+        status: err.response?.status,
+        data: err.response?.data,
+      });
+      return res.status(503).json({ error: 'Failed to update book availability', details: err.message });
     }
 
     // Create Loan
@@ -74,7 +111,7 @@ export const getAllLoans = async (req, res) => {
     const formattedLoans = await Promise.all(loans.map(async (loan) => {
       let bookData = {};
       try {
-        const bookResponse = await axiosInstance.get(`http://localhost:3002/api/books/${loan.bookId}`);
+        const bookResponse = await axiosInstance.get(`http://localhost:3000/api/books/${loan.bookId}`);
         const book = bookResponse.data;
         bookData = {
           id: book.id,
@@ -87,6 +124,7 @@ export const getAllLoans = async (req, res) => {
 
       return {
         id: loan._id,
+        userId: loan.userId,
         book: bookData,
         issue_date: loan.issueDate,
         due_date: loan.dueDate,
@@ -121,7 +159,7 @@ export const returnLoan = async (req, res) => {
 
     // Update Book Availability
     try {
-      await axiosInstance.patch(`http://localhost:3002/api/books/${loan.bookId}/availability`, {
+      await axiosInstance.patch(`http://localhost:3000/api/books/${loan.bookId}/availability`, {
         operation: 'increment',
       });
     } catch (err) {
@@ -140,7 +178,7 @@ export const returnLoan = async (req, res) => {
     // Fetch Book Details for Response
     let bookData = {};
     try {
-      const bookResponse = await axiosInstance.get(`http://localhost:3002/api/books/${loan.bookId}`);
+      const bookResponse = await axiosInstance.get(`http://localhost:3000/api/books/${loan.bookId}`);
       const book = bookResponse.data;
       bookData = {
         id: book.id,
@@ -174,7 +212,7 @@ export const getLoansByUser = async (req, res) => {
 
     // Validate User
     try {
-      await axiosInstance.get(`http://localhost:3001/api/users/${user_id}`);
+      await axiosInstance.get(`http://localhost:3000/api/users/${user_id}`);
     } catch (err) {
       if (err.response?.status === 404) {
         return res.status(404).json({ error: 'User not found' });
@@ -188,7 +226,7 @@ export const getLoansByUser = async (req, res) => {
     const formattedLoans = await Promise.all(loans.map(async (loan) => {
       let bookData = {};
       try {
-        const bookResponse = await axiosInstance.get(`http://localhost:3002/api/books/${loan.bookId}`);
+        const bookResponse = await axiosInstance.get(`http://localhost:3000/api/books/${loan.bookId}`);
         const book = bookResponse.data;
         bookData = {
           id: book.id,
